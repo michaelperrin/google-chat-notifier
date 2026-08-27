@@ -24,6 +24,16 @@ struct ChatSpace: Decodable, Identifiable, Sendable {
 
     var isDirectMessage: Bool { spaceType == "DIRECT_MESSAGE" }
     var isGroupChat: Bool { spaceType == "GROUP_CHAT" }
+    /// Salon nommé (« channel »), par opposition aux messages privés et aux groupes.
+    var isNamedSpace: Bool { spaceType == "SPACE" }
+
+    /// Nom affichable d'un salon. Les discussions de groupe n'ont souvent pas de
+    /// `displayName` : elles méritent un libellé distinct de « salon ».
+    var roomTitle: String {
+        let name = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        return isGroupChat ? "Discussion de groupe" : "Salon sans nom"
+    }
 
     /// Conversation entre humains (on écarte les DM avec les applications Chat).
     var isHumanConversation: Bool {
@@ -49,9 +59,21 @@ struct ChatMessage: Decodable, Identifiable, Sendable {
     /// Corps du message débarrassé des mentions d'applications Chat.
     let argumentText: String?
     let attachment: [ChatAttachment]?
+    /// Enrichissements du message : c'est là que Google place les mentions d'utilisateurs.
+    let annotations: [ChatAnnotation]?
 
     var id: String { name }
     var createDate: Date? { RFC3339.date(from: createTime) }
+
+    /// Le message me mentionne-t-il nommément (`@Moi`) ?
+    ///
+    /// On s'appuie sur les annotations plutôt que sur le texte : `text` contient bien
+    /// « @Prénom Nom », mais rien n'y distingue une vraie mention d'une homonymie, et
+    /// le libellé dépend de la langue de l'expéditeur.
+    func mentions(userID: String) -> Bool {
+        guard !userID.isEmpty else { return false }
+        return (annotations ?? []).contains { $0.isMention(of: userID) }
+    }
 
     /// Texte affichable, avec repli sur le nom de la pièce jointe puis un libellé générique.
     var displayText: String {
@@ -66,6 +88,26 @@ struct ChatMessage: Decodable, Identifiable, Sendable {
 
 struct ChatAttachment: Decodable, Sendable {
     let contentName: String?
+}
+
+/// Annotation d'un message. Seul `USER_MENTION` nous intéresse.
+struct ChatAnnotation: Decodable, Sendable {
+    struct UserMention: Decodable, Sendable {
+        let user: ChatUser?
+        /// `MENTION` (on m'a cité) ou `ADD` (on m'a ajouté au salon).
+        let type: String?
+    }
+
+    let type: String?
+    let userMention: UserMention?
+
+    /// Vraie mention de cet utilisateur — l'ajout à un salon (`ADD`) n'en est pas une :
+    /// il produit la même annotation mais n'appelle aucune réponse.
+    func isMention(of userID: String) -> Bool {
+        guard type == "USER_MENTION", let mention = userMention else { return false }
+        guard mention.type == nil || mention.type == "MENTION" else { return false }
+        return mention.user?.userID == userID
+    }
 }
 
 /// Utilisateur Chat. En authentification utilisateur, Google ne renseigne que `name` et `type` :

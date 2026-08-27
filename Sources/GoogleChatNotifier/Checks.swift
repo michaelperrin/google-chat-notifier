@@ -13,6 +13,7 @@ enum Checks {
         decodingChecks()
         selectionChecks()
         conversationChecks()
+        mentionChecks()
         oauthChecks()
         loopbackChecks()
         loopbackServerChecks()
@@ -247,7 +248,8 @@ enum Checks {
                 createTime: time,
                 text: "message \(id)",
                 argumentText: nil,
-                attachment: nil
+                attachment: nil,
+                annotations: nil
             )
         }
 
@@ -358,6 +360,115 @@ enum Checks {
         expect(ConversationRowView.relativeTime(
                 RFC3339.date(from: "2026-06-01T12:00:00Z")!, now: now, calendar: calendar) != "hier",
                "date ancienne → date courte")
+    }
+
+    private static func mentionChecks() {
+        print("Mentions @moi dans les salons")
+
+        let me = "42"
+
+        func annotation(user: String, kind: String? = "MENTION", type: String = "USER_MENTION")
+            -> ChatAnnotation {
+            ChatAnnotation(
+                type: type,
+                userMention: ChatAnnotation.UserMention(
+                    user: ChatUser(name: "users/\(user)", displayName: nil, type: "HUMAN"),
+                    type: kind
+                )
+            )
+        }
+
+        func message(
+            _ id: String,
+            from sender: String,
+            at time: String = "2026-08-27T10:00:00Z",
+            text: String = "on en parle ?",
+            annotations: [ChatAnnotation]?
+        ) -> ChatMessage {
+            ChatMessage(
+                name: "spaces/R/messages/\(id)",
+                sender: ChatUser(name: "users/\(sender)", displayName: nil, type: "HUMAN"),
+                createTime: time,
+                text: text,
+                argumentText: nil,
+                attachment: nil,
+                annotations: annotations
+            )
+        }
+
+        // Détection : c'est l'annotation qui fait foi, pas le texte.
+        expect(message("1", from: "7", annotations: [annotation(user: me)]).mentions(userID: me),
+               "annotation USER_MENTION sur moi → mention")
+        expect(!message("2", from: "7", annotations: [annotation(user: "99")]).mentions(userID: me),
+               "mention de quelqu'un d'autre → ignorée")
+        expect(!message("3", from: "7", annotations: nil).mentions(userID: me),
+               "aucune annotation → pas de mention")
+        expect(!message("4", from: "7", text: "@Moi tu peux voir ?", annotations: nil)
+                .mentions(userID: me),
+               "« @Moi » dans le texte sans annotation → pas de mention (homonymie)")
+        expect(!message("5", from: "7", annotations: [annotation(user: me, kind: "ADD")])
+                .mentions(userID: me),
+               "ajout au salon (ADD) → pas une mention")
+        expect(!message("6", from: "7", annotations: [annotation(user: me, type: "SLASH_COMMAND")])
+                .mentions(userID: me),
+               "annotation d'un autre type → ignorée")
+        expect(!message("7", from: "7", annotations: [annotation(user: me)]).mentions(userID: ""),
+               "identifiant vide → jamais de mention")
+        expect(message("8", from: "7",
+                       annotations: [annotation(user: "99"), annotation(user: me)])
+                .mentions(userID: me),
+               "mention parmi plusieurs annotations")
+
+        // Extraction : une entrée par message, mes propres messages écartés.
+        let room = ChatSpace(
+            name: "spaces/R", spaceType: "SPACE", displayName: "Équipe produit",
+            singleUserBotDm: nil, lastActiveTime: "2026-08-27T10:00:00Z",
+            spaceUri: "https://chat.google.com/room/R"
+        )
+        let extracted = Mention.extract(
+            from: [
+                message("a", from: "7", at: "2026-08-27T10:00:00Z", annotations: [annotation(user: me)]),
+                message("b", from: me, at: "2026-08-27T09:00:00Z", annotations: [annotation(user: me)]),
+                message("c", from: "8", at: "2026-08-27T11:00:00Z", annotations: [annotation(user: me)]),
+                message("d", from: "7", at: "2026-08-27T08:00:00Z", annotations: nil),
+            ],
+            in: room,
+            myUserID: me,
+            names: ["7": "Amélie Durand"],
+            accountEmail: "moi@exemple.com"
+        )
+        expect(extracted.count == 2, "deux mentions retenues sur quatre messages")
+        expect(!extracted.contains { $0.messageName.hasSuffix("/b") },
+               "mes propres messages ne me mentionnent jamais")
+        expect(extracted.first?.spaceTitle == "Équipe produit", "nom du salon repris")
+        expect(extracted.first?.authorName == "Amélie Durand", "auteur résolu via l'annuaire")
+        expect(extracted.last?.authorName == "Quelqu'un", "auteur non résolu → libellé de repli")
+        expect(extracted.first?.uri == "https://chat.google.com/room/R?authuser=moi@exemple.com",
+               "lien du salon complété par authuser")
+
+        expect(Mention.sorted(extracted).map(\.messageName)
+               == ["spaces/R/messages/c", "spaces/R/messages/a"],
+               "mentions triées de la plus récente à la plus ancienne")
+
+        // Libellés de salon.
+        expect(room.roomTitle == "Équipe produit", "salon nommé")
+        expect(ChatSpace(name: "spaces/G", spaceType: "GROUP_CHAT", displayName: nil,
+                         singleUserBotDm: nil, lastActiveTime: nil, spaceUri: nil).roomTitle
+               == "Discussion de groupe",
+               "groupe sans nom → libellé dédié")
+        expect(ChatSpace(name: "spaces/S", spaceType: "SPACE", displayName: "   ",
+                         singleUserBotDm: nil, lastActiveTime: nil, spaceUri: nil).roomTitle
+               == "Salon sans nom",
+               "salon au nom vide → libellé de repli")
+
+        // Sélection des salons : les messages privés n'entrent jamais dans cet onglet.
+        let now = RFC3339.date(from: "2026-08-27T12:00:00Z")!
+        let dm = ChatSpace(name: "spaces/D", spaceType: "DIRECT_MESSAGE", displayName: nil,
+                           singleUserBotDm: nil, lastActiveTime: "2026-08-27T11:00:00Z",
+                           spaceUri: nil)
+        let rooms = AppState.candidates(from: [room, dm], now: now, limit: 10,
+                                        accept: { !$0.isDirectMessage })
+        expect(rooms.map(\.name) == ["spaces/R"], "messages privés exclus des salons à scruter")
     }
 
     private static func oauthChecks() {

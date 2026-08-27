@@ -36,6 +36,15 @@ struct MenuContentView: View {
                         emptyMessage: "Aucune conversation récente."
                     )
                     .tabItem { Label("Récentes", systemImage: "clock") }
+
+                    MentionListSection(
+                        mentions: appState.mentions,
+                        error: appState.errorMessage,
+                        emptyMessage: appState.watchesMentions
+                            ? "Aucune mention non lue 🎉"
+                            : "Surveillance des mentions désactivée (voir Réglages)."
+                    )
+                    .tabItem { Label("Mentions", systemImage: "at") }
                 }
                 .padding(.top, 6)
             }
@@ -115,6 +124,52 @@ struct MenuContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+/// Section de l'onglet « Mentions ». Même structure que `ConversationListSection`,
+/// mais l'unité affichée est le message et non la conversation.
+private struct MentionListSection: View {
+    let mentions: [Mention]
+    let error: String?
+    let emptyMessage: String
+
+    var body: some View {
+        Group {
+            if let error {
+                PlaceholderView(text: error, icon: "exclamationmark.triangle")
+            } else if mentions.isEmpty {
+                PlaceholderView(text: emptyMessage, icon: nil)
+            } else {
+                List(mentions) { mention in
+                    MentionRowView(mention: mention)
+                        .listRowSeparator(.visible)
+                }
+                .listStyle(.inset)
+            }
+        }
+    }
+}
+
+/// État vide ou erreur, centré dans l'onglet.
+private struct PlaceholderView: View {
+    let text: String
+    let icon: String?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+            }
+            Text(text)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

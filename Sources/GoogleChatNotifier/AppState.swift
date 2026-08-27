@@ -9,6 +9,8 @@ final class AppState {
     /// Conversations récentes, non lues d'abord puis par activité décroissante.
     /// Une entrée par interlocuteur.
     var conversations: [Conversation] = []
+    /// Mentions `@moi` relevées dans les salons : le contenu de l'onglet « Mentions ».
+    var mentions: [Mention] = []
     var account: GoogleAccount?
 
     var isRefreshing = false
@@ -25,6 +27,10 @@ final class AppState {
     private static let maxSpaces = 30
     /// Messages non lus rapatriés par conversation.
     private static let maxUnreadPerSpace = 25
+    /// Salons examinés à chaque cycle pour y chercher des mentions (les plus récents).
+    private static let maxMentionSpaces = 20
+    /// Messages remontés par salon lors de la recherche de mentions.
+    private static let maxMessagesPerRoom = 30
     /// Appels simultanés à l'API.
     private static let concurrency = 6
 
@@ -41,9 +47,9 @@ final class AppState {
     /// Conversations en attente de ma réponse : le contenu de l'onglet « À traiter ».
     var pendingConversations: [Conversation] { conversations.filter(\.needsReply) }
 
-    /// Compteur affiché dans la barre de menus = nombre de conversations à traiter
-    /// (une par personne, quel que soit le nombre de messages reçus).
-    var badgeCount: Int { pendingConversations.count }
+    /// Compteur affiché dans la barre de menus : conversations à traiter + mentions
+    /// non lues. Les deux appellent une action de ma part.
+    var badgeCount: Int { pendingConversations.count + mentions.count }
 
     /// Avertissements non bloquants à afficher en bandeau au-dessus de la liste.
     /// Sans eux, une panne de résolution des noms se traduit par une liste de
@@ -52,6 +58,9 @@ final class AppState {
         [readStateWarning, directoryWarning.map { "Noms des interlocuteurs non résolus : \($0)" }]
             .compactMap { $0 }
     }
+
+    /// La surveillance des mentions est-elle active ? (pilote le message de l'onglet vide)
+    var watchesMentions: Bool { preferences.watchMentions }
 
     var isSignedIn: Bool { OAuthService.shared.isSignedIn }
 
@@ -87,6 +96,7 @@ final class AppState {
         errorMessage = nil
         directoryWarning = nil
         readStateWarning = nil
+        mentions = []
         lastUpdated = nil
     }
 
@@ -178,8 +188,70 @@ final class AppState {
         }
         conversations = Conversation.sorted(built)
 
-        // 6. Notifications sur les nouveaux messages non lus.
+        // 6. Mentions @moi dans les salons (indépendant des conversations privées).
+        mentions = preferences.watchMentions
+            ? await loadMentions(client: client, token: token, myUserID: myUserID, myEmail: myEmail)
+            : []
+
+        // 7. Notifications sur les nouveaux messages non lus.
         notify(built, names: names, notifyNew: notifyNew)
+    }
+
+    /// Mentions `@moi` dans les salons nommés et les discussions de groupe.
+    ///
+    /// L'API Chat n'a pas de point d'entrée « mes mentions » et `spaces.messages.list`
+    /// ne filtre que sur `createTime` : il faut donc parcourir les messages salon par
+    /// salon. Le coût est borné de trois façons — salons récents seulement, les
+    /// `maxMentionSpaces` plus actifs, et uniquement les messages postérieurs à ma
+    /// dernière lecture.
+    ///
+    /// Les messages privés sont exclus : ils sont déjà couverts en entier par les deux
+    /// autres onglets, et tout y est adressé à moi.
+    private func loadMentions(
+        client: GoogleChatClient,
+        token: String,
+        myUserID: String,
+        myEmail: String?
+    ) async -> [Mention] {
+        guard !myUserID.isEmpty else { return [] }
+
+        let rooms: [ChatSpace]
+        do {
+            rooms = Self.candidates(
+                from: try await client.listSpaces(types: ["SPACE", "GROUP_CHAT"]),
+                now: Date(),
+                limit: Self.maxMentionSpaces,
+                accept: { !$0.isDirectMessage }
+            )
+        } catch {
+            // Un salon inaccessible ne doit pas faire échouer tout le rafraîchissement :
+            // l'onglet reste vide, les conversations privées continuent de fonctionner.
+            return []
+        }
+
+        let found = await mapConcurrently(rooms, limit: Self.concurrency) { room -> [ChatMessage] in
+            // Sans état de lecture, on se contente de la dernière page : mieux vaut
+            // rater une vieille mention que rapatrier tout l'historique du salon.
+            let lastRead = try? await client.readState(spaceID: room.spaceID).lastReadTime
+            return (try? await client.messages(
+                inSpace: room.name,
+                after: lastRead,
+                limit: Self.maxMessagesPerRoom
+            )) ?? []
+        }
+
+        // Résolution des auteurs en un seul lot, comme pour les conversations.
+        let authorIDs = found.flatMap { $0.compactMap { $0.sender?.userID } }
+        let authorNames = await DirectoryService.shared.resolveNames(for: authorIDs, accessToken: token)
+
+        let extracted = zip(rooms, found).flatMap { room, messages in
+            Mention.extract(from: messages,
+                            in: room,
+                            myUserID: myUserID,
+                            names: authorNames,
+                            accountEmail: myEmail)
+        }
+        return Mention.sorted(extracted)
     }
 
     // MARK: - Assemblage (fonctions pures, testables)
@@ -218,10 +290,17 @@ final class AppState {
 
     /// Conversations retenues : humaines, actives récemment, les plus récentes d'abord.
     /// Fonction pure (testable).
-    static func candidates(from spaces: [ChatSpace], now: Date, limit: Int) -> [ChatSpace] {
+    /// - Parameter accept: critère d'admission, pour distinguer les conversations
+    ///   privées (défaut) des salons interrogés pour les mentions.
+    static func candidates(
+        from spaces: [ChatSpace],
+        now: Date,
+        limit: Int,
+        accept: (ChatSpace) -> Bool = { $0.isHumanConversation }
+    ) -> [ChatSpace] {
         let cutoff = now.addingTimeInterval(-recencyWindow)
         return spaces
-            .filter(\.isHumanConversation)
+            .filter(accept)
             .filter { ($0.lastActiveDate ?? .distantPast) > cutoff }
             .sorted { ($0.lastActiveDate ?? .distantPast) > ($1.lastActiveDate ?? .distantPast) }
             .prefix(limit)

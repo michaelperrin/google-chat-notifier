@@ -113,7 +113,18 @@ struct SettingsView: View {
                         poller.refreshNow()
                     }
                 Text("Par défaut, seuls les messages privés en tête-à-tête sont suivis. "
-                     + "Les salons nommés ne le sont jamais.")
+                     + "Les salons nommés n'apparaissent que dans l'onglet « Mentions ».")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Surveiller les mentions @moi dans les salons", isOn: $preferences.watchMentions)
+                    .onChange(of: preferences.watchMentions) {
+                        poller.refreshNow()
+                    }
+                Text("Parcourt les salons les plus actifs à chaque rafraîchissement pour "
+                     + "y repérer les messages qui vous citent. Google n'offrant aucun "
+                     + "moyen de lister ses mentions directement, cette option ajoute un "
+                     + "appel par salon : désactivez-la si les rafraîchissements traînent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

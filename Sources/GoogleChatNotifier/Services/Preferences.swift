@@ -14,6 +14,7 @@ final class Preferences {
         static let clientID = "oauth.clientID"
         static let refreshMinutes = "refreshMinutes"
         static let includeGroupChats = "includeGroupChats"
+        static let watchMentions = "watchMentions"
         static let accountEmail = "account.email"
         static let accountName = "account.name"
         static let accountSub = "account.sub"
@@ -26,6 +27,9 @@ final class Preferences {
         let minutes = defaults.integer(forKey: Key.refreshMinutes)
         self.refreshMinutes = minutes > 0 ? minutes : 2
         self.includeGroupChats = defaults.bool(forKey: Key.includeGroupChats)
+        // Activé par défaut, d'où la double lecture : `bool(forKey:)` rend `false`
+        // pour une clé absente, ce qui désactiverait l'option au premier lancement.
+        self.watchMentions = defaults.object(forKey: Key.watchMentions) as? Bool ?? true
     }
 
     /// Client ID OAuth du client « Application de bureau ». Requis, sans défaut.
@@ -41,6 +45,15 @@ final class Preferences {
     /// Inclure aussi les discussions de groupe (hors salons nommés). Défaut : non.
     var includeGroupChats: Bool {
         didSet { defaults.set(includeGroupChats, forKey: Key.includeGroupChats) }
+    }
+
+    /// Surveiller les mentions `@moi` dans les salons. Défaut : oui.
+    ///
+    /// Coûteux : l'API Chat n'expose aucun point d'entrée « mes mentions », il faut
+    /// parcourir les messages de chaque salon (voir `AppState.loadMentions`). D'où
+    /// l'interrupteur.
+    var watchMentions: Bool {
+        didSet { defaults.set(watchMentions, forKey: Key.watchMentions) }
     }
 
     /// Types de spaces interrogés, au format attendu par le filtre de `spaces.list`.
