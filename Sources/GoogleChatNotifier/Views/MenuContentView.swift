@@ -13,6 +13,15 @@ struct MenuContentView: View {
             if !appState.isConfigured || !appState.isSignedIn {
                 onboarding
             } else {
+                ForEach(appState.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 TabView {
                     ConversationListSection(
                         conversations: appState.pendingConversations,

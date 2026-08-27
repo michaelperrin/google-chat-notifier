@@ -62,9 +62,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let warning = appState.directoryWarning {
-                    Label("Noms des interlocuteurs non résolus : \(warning)",
-                          systemImage: "exclamationmark.triangle")
+                ForEach(appState.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                         .font(.caption)
                 }

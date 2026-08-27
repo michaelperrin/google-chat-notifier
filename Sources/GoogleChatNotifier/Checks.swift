@@ -203,6 +203,21 @@ enum Checks {
         expect(!readState.isUnread, "dernier message antérieur à la lecture → lu")
         expect(neverOpened.isUnread, "conversation jamais ouverte → non lue")
 
+        // État de lecture indisponible : on ne prétend pas que tout est non lu.
+        let broken = AppState.SpaceState(
+            space: space(id: "D", lastActive: "2026-08-27T11:00:00Z"),
+            lastReadTime: nil,
+            readStateError: "403 PERMISSION_DENIED"
+        )
+        expect(!broken.isUnread, "état de lecture en échec → conversation considérée lue")
+        expect(AppState.readStateWarning(for: [unreadState, readState, broken]) == nil,
+               "un échec isolé n'alerte pas")
+        expect(AppState.readStateWarning(for: [broken, broken, unreadState])?
+                .contains("chat.users.readstate.readonly") == true,
+               "échec généralisé → avertissement nommant le périmètre manquant")
+        expect(AppState.readStateWarning(for: [unreadState, readState]) == nil,
+               "aucun échec → aucun avertissement")
+
         expect(AppState.title(space: space(id: "A", lastActive: nil),
                               participants: ["123"], names: ["123": "Amélie Durand"])
                == "Amélie Durand",

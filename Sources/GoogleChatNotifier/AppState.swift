@@ -15,6 +15,8 @@ final class AppState {
     var errorMessage: String?
     /// Avertissement non bloquant (ex. noms d'interlocuteurs non résolus).
     var directoryWarning: String?
+    /// Avertissement non bloquant : l'état « lu/non lu » n'a pas pu être récupéré.
+    var readStateWarning: String?
     var lastUpdated: Date?
 
     /// Ancienneté maximale d'une conversation prise en compte.
@@ -42,6 +44,14 @@ final class AppState {
     /// Compteur affiché dans la barre de menus = nombre de conversations à traiter
     /// (une par personne, quel que soit le nombre de messages reçus).
     var badgeCount: Int { pendingConversations.count }
+
+    /// Avertissements non bloquants à afficher en bandeau au-dessus de la liste.
+    /// Sans eux, une panne de résolution des noms se traduit par une liste de
+    /// « Conversation privée » indistinctes, sans explication.
+    var warnings: [String] {
+        [readStateWarning, directoryWarning.map { "Noms des interlocuteurs non résolus : \($0)" }]
+            .compactMap { $0 }
+    }
 
     var isSignedIn: Bool { OAuthService.shared.isSignedIn }
 
@@ -76,6 +86,7 @@ final class AppState {
         conversations = []
         errorMessage = nil
         directoryWarning = nil
+        readStateWarning = nil
         lastUpdated = nil
     }
 
@@ -131,9 +142,14 @@ final class AppState {
 
         // 2. État de lecture de chacune : c'est ce qui définit « non lu ».
         let readStates = await mapConcurrently(candidates, limit: Self.concurrency) { space in
-            let state = try? await client.readState(spaceID: space.spaceID)
-            return SpaceState(space: space, lastReadTime: state?.lastReadTime)
+            do {
+                let state = try await client.readState(spaceID: space.spaceID)
+                return SpaceState(space: space, lastReadTime: state.lastReadTime)
+            } catch {
+                return SpaceState(space: space, lastReadTime: nil, readStateError: Self.describe(error))
+            }
         }
+        readStateWarning = Self.readStateWarning(for: readStates)
 
         // 3. Messages : tous les non lus si la conversation en a, sinon le dernier message
         //    seul (suffisant pour savoir si j'ai répondu et pour afficher l'aperçu).
@@ -169,9 +185,22 @@ final class AppState {
     struct SpaceState: Sendable {
         let space: ChatSpace
         let lastReadTime: String?
+        /// Erreur rencontrée en lisant l'état de lecture (périmètre manquant, panne…).
+        let readStateError: String?
+
+        init(space: ChatSpace, lastReadTime: String?, readStateError: String? = nil) {
+            self.space = space
+            self.lastReadTime = lastReadTime
+            self.readStateError = readStateError
+        }
 
         /// Non lue : le dernier message est postérieur à ma dernière lecture.
+        ///
+        /// Sans état de lecture fiable, on considère la conversation comme lue : mieux vaut
+        /// rater une notification que faire clignoter tout l'historique. Le problème est
+        /// remonté à part, dans `readStateWarning`.
         var isUnread: Bool {
+            guard readStateError == nil else { return false }
             guard let lastActive = space.lastActiveDate else { return false }
             guard let lastRead = RFC3339.date(from: lastReadTime) else { return true }
             return lastActive > lastRead
@@ -194,6 +223,19 @@ final class AppState {
             .sorted { ($0.lastActiveDate ?? .distantPast) > ($1.lastActiveDate ?? .distantPast) }
             .prefix(limit)
             .map { $0 }
+    }
+
+    /// Avertissement quand l'état de lecture est massivement indisponible : sans lui,
+    /// l'app ne peut plus distinguer lu et non lu. Fonction pure (testable).
+    static func readStateWarning(for states: [SpaceState]) -> String? {
+        let failures = states.compactMap(\.readStateError)
+        guard !failures.isEmpty else { return nil }
+        // Un échec isolé (conversation supprimée…) n'a pas à alerter.
+        guard failures.count > states.count / 2 else { return nil }
+        return "État « lu / non lu » indisponible (\(failures.count)/\(states.count) conversations) : "
+            + (failures.first ?? "erreur inconnue")
+            + " — vérifiez que le périmètre chat.users.readstate.readonly est bien autorisé, "
+            + "puis reconnectez le compte."
     }
 
     /// Nom affiché pour une conversation : nom du space s'il en a un, sinon les participants.
@@ -269,7 +311,7 @@ final class AppState {
         }
     }
 
-    private static func describe(_ error: Error) -> String {
+    nonisolated static func describe(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }
