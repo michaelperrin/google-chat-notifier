@@ -26,9 +26,18 @@ struct Conversation: Identifiable, Sendable {
     var unreadCount: Int { unread.count }
     var isUnread: Bool { !unread.isEmpty }
 
-    /// En attente de ma réponse : le dernier message n'est pas de moi.
+    /// En attente de ma réponse : il reste des messages non lus **et** le dernier
+    /// message n'est pas de moi.
     /// C'est le critère de l'onglet « À traiter » et du compteur de la barre de menus.
-    var needsReply: Bool { preview != nil && !lastMessageIsMine }
+    ///
+    /// L'état de lecture fait partie du critère : un message déjà ouvert dans Google
+    /// Chat sort de la liste, même sans réponse de ma part. Sinon toute conversation
+    /// dont je n'ai pas eu le dernier mot y resterait indéfiniment.
+    ///
+    /// Les deux conditions sont nécessaires : `isUnread` seul laisserait passer une
+    /// conversation où j'ai répondu depuis un autre appareil sans que l'état de
+    /// lecture ait suivi.
+    var needsReply: Bool { isUnread && !lastMessageIsMine }
 
     /// Tri d'affichage : non lues d'abord, puis par activité décroissante.
     static func sorted(_ conversations: [Conversation]) -> [Conversation] {

@@ -281,6 +281,34 @@ enum Checks {
         )
         expect(!empty.needsReply, "conversation sans message → rien à traiter")
 
+        // Déjà lu dans Google Chat : le dernier message vient bien de l'autre, mais
+        // il n'y a plus rien à traiter tant qu'aucun nouveau message n'arrive.
+        let readByMe = Conversation(
+            spaceName: "spaces/D",
+            title: "Denis",
+            uri: nil,
+            lastActive: RFC3339.date(from: "2026-08-27T08:00:00Z"),
+            preview: "tu as vu le compte rendu ?",
+            lastMessageIsMine: false,
+            unread: [],
+            isGroup: false
+        )
+        expect(!readByMe.needsReply, "message reçu mais déjà lu → rien à traiter")
+
+        // Répondu depuis un autre appareil sans que l'état de lecture ait suivi.
+        let answeredElsewhere = Conversation(
+            spaceName: "spaces/E",
+            title: "Émile",
+            uri: nil,
+            lastActive: RFC3339.date(from: "2026-08-27T08:00:00Z"),
+            preview: "de rien !",
+            lastMessageIsMine: true,
+            unread: [message("9", from: "123", at: "2026-08-27T07:00:00Z")],
+            isGroup: false
+        )
+        expect(!answeredElsewhere.needsReply,
+               "non lu mais dernier message de moi → rien à traiter")
+
         let sorted = Conversation.sorted([answered, empty, pending])
         expect(sorted.map(\.spaceName) == ["spaces/A", "spaces/B", "spaces/C"],
                "non lues d'abord, puis par activité décroissante")
