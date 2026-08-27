@@ -291,6 +291,32 @@ enum Checks {
         expect(Conversation.openURL(uri: nil, spaceName: "spaces/AAAA")
                == "https://mail.google.com/chat/u/0/#chat/space/AAAA",
                "repli sur l'URL web de Google Chat")
+
+        // Plusieurs comptes Google ouverts : l'URL doit désigner le bon compte.
+        expect(Conversation.openURL(uri: "https://chat.google.com/dm/A",
+                                    spaceName: "spaces/A",
+                                    accountEmail: "moi@exemple.com")
+               == "https://chat.google.com/dm/A?authuser=moi@exemple.com",
+               "spaceUri complété par authuser")
+        expect(Conversation.openURL(uri: nil,
+                                    spaceName: "spaces/AAAA",
+                                    accountEmail: "moi@exemple.com")
+               == "https://mail.google.com/chat/?authuser=moi@exemple.com#chat/space/AAAA",
+               "repli : authuser avant le fragment, plus d'index /u/N/ en dur")
+        expect(Conversation.withAuthUser("https://chat.google.com/dm/A?hl=fr",
+                                         email: "moi@exemple.com")
+               == "https://chat.google.com/dm/A?hl=fr&authuser=moi@exemple.com",
+               "authuser ajouté aux paramètres existants")
+        expect(Conversation.withAuthUser("https://chat.google.com/dm/A?authuser=autre@exemple.com",
+                                         email: "moi@exemple.com")
+               == "https://chat.google.com/dm/A?authuser=autre@exemple.com",
+               "authuser déjà présent : jamais écrasé")
+        expect(Conversation.withAuthUser("https://chat.google.com/dm/A", email: nil)
+               == "https://chat.google.com/dm/A",
+               "compte inconnu : URL inchangée")
+        expect(Conversation.withAuthUser("https://chat.google.com/dm/A", email: "")
+               == "https://chat.google.com/dm/A",
+               "adresse vide : URL inchangée")
         expect(Conversation.openURL(uri: "", spaceName: "spaces/AAAA").hasPrefix("https://mail.google.com"),
                "spaceUri vide → repli")
 

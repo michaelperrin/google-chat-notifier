@@ -40,9 +40,35 @@ struct Conversation: Identifiable, Sendable {
 
     /// URL d'ouverture, avec repli sur l'URL web de Google Chat quand l'API ne fournit
     /// pas `spaceUri`.
-    static func openURL(uri: String?, spaceName: String) -> String {
-        if let uri, !uri.isEmpty { return uri }
-        let id = spaceName.hasPrefix("spaces/") ? String(spaceName.dropFirst(7)) : spaceName
-        return "https://mail.google.com/chat/u/0/#chat/space/\(id)"
+    ///
+    /// `accountEmail` désambiguïse le compte quand plusieurs sessions Google sont
+    /// ouvertes dans le navigateur : sans lui, Chat s'ouvre sur le compte par défaut et
+    /// la conversation est introuvable. On passe par `authuser=<email>` plutôt que par
+    /// l'index `/u/N/` : cet index est positionnel, il change dès qu'un compte est
+    /// ajouté ou retiré du navigateur, alors que l'adresse, elle, est stable.
+    static func openURL(uri: String?, spaceName: String, accountEmail: String? = nil) -> String {
+        let base: String
+        if let uri, !uri.isEmpty {
+            base = uri
+        } else {
+            let id = spaceName.hasPrefix("spaces/") ? String(spaceName.dropFirst(7)) : spaceName
+            // Sans compte connu, on retombe sur l'index 0 — le compte par défaut.
+            let index = accountEmail == nil ? "u/0/" : ""
+            base = "https://mail.google.com/chat/\(index)#chat/space/\(id)"
+        }
+        return withAuthUser(base, email: accountEmail)
+    }
+
+    /// Ajoute `authuser=<email>` à une URL Google, sans écraser un paramètre déjà présent.
+    /// Le paramètre doit précéder le fragment (`#chat/space/…`) pour que Chat le voie,
+    /// ce dont `URLComponents` se charge.
+    static func withAuthUser(_ urlString: String, email: String?) -> String {
+        guard let email, !email.isEmpty,
+              var components = URLComponents(string: urlString) else { return urlString }
+        var items = components.queryItems ?? []
+        guard !items.contains(where: { $0.name == "authuser" }) else { return urlString }
+        items.append(URLQueryItem(name: "authuser", value: email))
+        components.queryItems = items
+        return components.url?.absoluteString ?? urlString
     }
 }

@@ -91,6 +91,15 @@ enum Diagnostics {
             print("    dernier msg de : \(senderID.map(mask) ?? "inconnu")\(isMine ? "  (= moi)" : "")")
             print("    → à traiter    : \(!isMine && latest != nil)")
 
+            // Compte visé par le lien d'ouverture : avec plusieurs sessions Google
+            // ouvertes, un lien sans `authuser` tombe sur le mauvais compte.
+            let openURL = Conversation.openURL(uri: space.spaceUri,
+                                               spaceName: space.name,
+                                               accountEmail: account?.email)
+            let target = URLComponents(string: openURL)?
+                .queryItems?.first { $0.name == "authuser" }?.value
+            print("    ouverture      : \(target.map { "compte \($0)" } ?? "COMPTE PAR DÉFAUT (authuser absent)")")
+
             let participants = try? await client.humanMemberIDs(inSpace: space.name)
             let others = (participants ?? []).filter { $0 != myUserID }
             let names = await DirectoryService.shared.resolveNames(for: others, accessToken: token)

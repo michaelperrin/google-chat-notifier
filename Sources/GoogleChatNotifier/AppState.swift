@@ -131,6 +131,7 @@ final class AppState {
         let token = try await OAuthService.shared.token()
         let client = GoogleChatClient(accessToken: token)
         let myUserID = account?.sub ?? ""
+        let myEmail = account?.email
 
         // 1. Conversations privées (et discussions de groupe si l'option est activée),
         //    limitées aux plus récentes.
@@ -172,7 +173,9 @@ final class AppState {
         let names = await DirectoryService.shared.resolveNames(for: userIDs, accessToken: token)
 
         // 5. Construction du modèle d'affichage : une entrée par conversation.
-        let built = loaded.map { Self.makeConversation($0, names: names, myUserID: myUserID) }
+        let built = loaded.map {
+            Self.makeConversation($0, names: names, myUserID: myUserID, accountEmail: myEmail)
+        }
         conversations = Conversation.sorted(built)
 
         // 6. Notifications sur les nouveaux messages non lus.
@@ -257,7 +260,8 @@ final class AppState {
     private static func makeConversation(
         _ loaded: LoadedSpace,
         names: [String: String],
-        myUserID: String
+        myUserID: String,
+        accountEmail: String?
     ) -> Conversation {
         let space = loaded.state.space
         // `messages` est trié du plus récent au plus ancien dans les deux branches
@@ -271,7 +275,9 @@ final class AppState {
         return Conversation(
             spaceName: space.name,
             title: title(space: space, participants: loaded.participants, names: names),
-            uri: Conversation.openURL(uri: space.spaceUri, spaceName: space.name),
+            uri: Conversation.openURL(uri: space.spaceUri,
+                                      spaceName: space.name,
+                                      accountEmail: accountEmail),
             lastActive: latest?.createDate ?? space.lastActiveDate,
             preview: latest?.displayText,
             lastMessageIsMine: latest?.sender?.userID == myUserID,
