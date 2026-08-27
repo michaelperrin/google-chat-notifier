@@ -9,6 +9,8 @@ enum Main {
     static func main() {
         if CommandLine.arguments.contains("--run-checks") {
             Checks.run()
+        } else if CommandLine.arguments.contains("--diagnose") {
+            Diagnostics.run()
         } else {
             GoogleChatNotifierApp.main()
         }
